@@ -15,36 +15,36 @@ export const normalize = (p: string): NormalizedPath => {
   return output as NormalizedPath
 }
 
-export const parse: (p: NormalizedPath) => {
-  root: NormalizedPath
-} = path.parse as any
+export const parse = (p: NormalizedPath): { root: NormalizedPath } => {
+  const parsed = path.parse(p)
+  return { root: parsed.root as NormalizedPath }
+}
 
-export const resolve = isWindows
-  ? (...paths: string[]) => normalize(path.win32.resolve(...paths))
-  : (path.posix.resolve as (...paths: string[]) => NormalizedPath)
+export const resolve = (...paths: string[]): NormalizedPath =>
+  isWindows
+    ? normalize(path.win32.resolve(...paths))
+    : (path.posix.resolve(...paths) as NormalizedPath)
 
-export const isAbsolute = isWindows
+export const isAbsolute: (p: string) => boolean = isWindows
   ? path.win32.isAbsolute
   : path.posix.isAbsolute
 
 /** Only call this on normalized paths */
-export const join = path.posix.join as (
-  ...paths: NormalizedPath[]
-) => NormalizedPath
+export const join = (...paths: NormalizedPath[]): NormalizedPath =>
+  path.posix.join(...paths) as NormalizedPath
 
 /** Only call this on normalized paths */
-export const relative = path.posix.relative as (
+export const relative = (
   from: NormalizedPath,
   to: NormalizedPath
-) => NormalizedPath
+): NormalizedPath => path.posix.relative(from, to) as NormalizedPath
 
 /** Only call this on normalized paths */
-export const basename = path.posix.basename as (
-  path: NormalizedPath,
-  suffix?: string
-) => NormalizedPath
+export const basename = (p: NormalizedPath, suffix?: string): NormalizedPath =>
+  path.posix.basename(p, suffix) as NormalizedPath
 
 /** Only call this on normalized paths */
-export const dirname = path.dirname as (p: NormalizedPath) => NormalizedPath
+export const dirname = (p: NormalizedPath): NormalizedPath =>
+  path.dirname(p) as NormalizedPath
 
-export const relativeImportRE = /^\.\.?(\/|$)/
+export const relativeImportRE: RegExp = /^\.\.?(\/|$)/

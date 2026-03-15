@@ -15,8 +15,9 @@ export type LogEvent =
   | ['resolvedToDeclarationFile', ResolveDetails]
   | ['resolvedWithBaseUrl', ResolveDetails]
   | ['resolvedWithPaths', ResolveDetails]
+  | ['resolved', ResolveDetails]
   | ['resolvedFromCache', ResolveDetails]
-  | ['notFound', NotFoundDetails]
+  | ['notFound', NotFoundDetails | ConfigDetails]
   | ['configMismatch', ConfigDetails]
 
 /**
@@ -42,7 +43,7 @@ export function createLogFile(logFilePath: string) {
   })
 
   return {
-    write(...event: LogEvent) {
+    write(...event: LogEvent): void {
       logFile.write(event[0] + ': ' + JSON.stringify(event[1]) + '\n')
     },
   }

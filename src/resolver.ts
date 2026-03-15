@@ -1,22 +1,15 @@
-import globRex from 'globrex'
 import * as fs from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { isAbsolute, join, relative } from 'node:path'
 import { inspect } from 'node:util'
+import { ResolverFactory } from 'oxc-resolver'
 import * as tsconfck from 'tsconfck'
 import * as vite from 'vite'
 import { debug } from './debug'
 import { LogFileWriter } from './logFile'
-import { resolvePathMappings } from './mappings'
 import type { NormalizedPath } from './path'
 import * as path from './path'
-import {
-  Directory,
-  PluginOptions,
-  Project,
-  Resolver,
-  ViteResolve,
-} from './types'
+import { Directory, PluginOptions, Project, Resolver } from './types'
 
 const notApplicable = [undefined, false] as const
 const notFound = [undefined, true] as const
@@ -29,7 +22,11 @@ const emptyDirectory: Directory = {
 
 type Logger = Pick<vite.Logger, 'error' | 'hasErrorLogged'>
 
-export type TsconfigResolvers = ReturnType<typeof createTsconfigResolvers>
+export interface TsconfigResolvers {
+  reset: () => void
+  get: (importer: string) => AsyncIterable<Resolver>
+  watch: (watcher: vite.FSWatcher) => void
+}
 
 export function createTsconfigResolvers({
   projectRoot,
@@ -43,7 +40,7 @@ export function createTsconfigResolvers({
   workspaceRoot: string
   logFile?: LogFileWriter | null
   logger: Logger
-}) {
+}): TsconfigResolvers {
   let initializing: Promise<void> | undefined
   let directoryCache: Map<string, Directory>
   let resolversByProject: WeakMap<Project, Resolver>
@@ -392,93 +389,35 @@ function createResolver(
   const compilerOptions = config.compilerOptions || {}
   const { baseUrl, paths } = compilerOptions
 
-  type InternalResolver = (
-    viteResolve: ViteResolve,
-    id: string,
-    importer: string
-  ) => Promise<string | undefined>
-
-  const resolveWithBaseUrl: InternalResolver | undefined = baseUrl
-    ? async (viteResolve, id, importer) => {
-        if (id[0] === '/') {
-          return
-        }
-        const absoluteId = join(baseUrl, id)
-        const resolvedId = await viteResolve(absoluteId, importer)
-        if (resolvedId) {
-          if (resolvedId.endsWith('.json') && !id.endsWith('.json')) {
-            return
-          }
-          logFile?.write('resolvedWithBaseUrl', {
-            importer,
-            id,
-            resolvedId,
-            configPath,
-          })
-          return resolvedId
-        }
-      }
-    : undefined
-
-  let resolveId: InternalResolver
-  if (paths) {
-    const pathsRootDir = resolvePathsRootDir(project)
-    const pathMappings = resolvePathMappings(paths, pathsRootDir)
-
-    const resolveWithPaths: InternalResolver = async (
-      viteResolve,
-      id,
-      importer
-    ) => {
-      const candidates = logFile ? ([] as string[]) : null
-      for (const mapping of pathMappings) {
-        const match = id.match(mapping.pattern)
-        if (!match) {
-          continue
-        }
-        for (let pathTemplate of mapping.paths) {
-          let starCount = 0
-          const mappedId = pathTemplate.replace(/\*/g, () => {
-            // There may exist more globs in the path template than in
-            // the match pattern. In that case, we reuse the final glob
-            // match.
-            const matchIndex = Math.min(++starCount, match.length - 1)
-            return match[matchIndex]
-          })
-          candidates?.push(mappedId)
-          const resolvedId = await viteResolve(mappedId, importer)
-          if (resolvedId) {
-            logFile?.write('resolvedWithPaths', {
-              importer,
-              id,
-              resolvedId,
-              configPath,
-            })
-            return resolvedId
-          }
-        }
-      }
-      logFile?.write('notFound', {
-        importer,
-        id,
-        candidates,
-        configPath,
-      })
-    }
-
-    if (resolveWithBaseUrl) {
-      resolveId = async (viteResolve, id, importer) =>
-        (await resolveWithPaths(viteResolve, id, importer)) ??
-        (await resolveWithBaseUrl(viteResolve, id, importer))
-    } else {
-      resolveId = resolveWithPaths
-    }
-  } else if (resolveWithBaseUrl) {
-    resolveId = resolveWithBaseUrl
-  } else {
+  if (!paths && !baseUrl) {
     debug(`[!] Skipping "${configPath}" as no paths or baseUrl are defined.`)
     return null
   }
+
+  // Create an oxc-resolver instance for this project's tsconfig.
+  // Using modules: [] prevents node_modules resolution — we only want
+  // tsconfig paths and baseUrl resolution.
+  const oxcResolver = new ResolverFactory({
+    tsconfig: { configFile: configPath },
+    extensions: [
+      '.ts',
+      '.tsx',
+      '.js',
+      '.jsx',
+      '.mts',
+      '.mjs',
+      '.cts',
+      '.cjs',
+      '.vue',
+      '.svelte',
+      '.astro',
+      '.mdx',
+      '.json',
+    ],
+    mainFiles: ['index'],
+    modules: [],
+    symlinks: true,
+  })
 
   const configDir = path.normalize(path.dirname(configPath))
 
@@ -498,7 +437,7 @@ function createResolver(
 
   const isImporterSupported = opts.loose
     ? () => true
-    : opts.importerFilter ??
+    : (opts.importerFilter ??
       (() => {
         const extensionFilter =
           compilerOptions.allowJs ||
@@ -507,7 +446,7 @@ function createResolver(
             : /\.[mc]?tsx?$/
 
         return (importer: string) => extensionFilter.test(importer)
-      })()
+      })())
 
   const resolutionCache = new Map<string, string>()
 
@@ -548,8 +487,31 @@ function createResolver(
         configPath,
       })
     } else {
-      resolvedId = await resolveId(viteResolve, id, importer)
+      // Use oxc-resolver for fast native tsconfig path resolution.
+      const importerDir = path.dirname(importerFile)
+      const result = oxcResolver.sync(importerDir, id)
+
+      if (result.path) {
+        const resolved = path.normalize(result.path)
+
+        // Skip .json resolutions unless explicitly imported (prevents
+        // accidental resolution to .json via baseUrl).
+        if (resolved.endsWith('.json') && !id.endsWith('.json')) {
+          logFile?.write('notFound', { importer, id, configPath })
+          return notFound
+        }
+
+        resolvedId = resolved
+        logFile?.write('resolved', {
+          importer,
+          id,
+          resolvedId,
+          configPath,
+        })
+      }
+
       if (!resolvedId) {
+        logFile?.write('notFound', { importer, id, configPath })
         return notFound
       }
       resolutionCache.set(id, resolvedId)
@@ -575,24 +537,6 @@ function createResolver(
 
     return [resolvedId, true]
   }
-}
-
-function resolvePathsRootDir(project: Project): string {
-  if (project.result) {
-    const { options } = project.result
-    if (options && typeof options.pathsBasePath === 'string') {
-      return options.pathsBasePath
-    }
-    return path.dirname(project.tsconfigFile)
-  }
-  const baseUrl = project.tsconfig.compilerOptions?.baseUrl
-  if (baseUrl) {
-    return baseUrl
-  }
-  const projectWithPaths = project.extended?.find(
-    (project) => project.tsconfig.compilerOptions?.paths
-  )
-  return path.dirname((projectWithPaths ?? project).tsconfigFile)
 }
 
 const defaultInclude = ['**/*']
@@ -662,11 +606,33 @@ function addCompiledGlob(this: RegExp[], glob: string) {
   }
 }
 
-function compileGlob(glob: string) {
-  return globRex(glob, {
-    extended: true,
-    globstar: true,
-  }).regex
+function compileGlob(glob: string): RegExp {
+  // Normalize consecutive slashes (e.g. "./" + "/**" → ".//***" → "./**")
+  glob = glob.replace(/\/{2,}/g, '/')
+  let result = ''
+  for (let i = 0; i < glob.length; i++) {
+    const char = glob[i]
+    if (char === '*') {
+      if (glob[i + 1] === '*') {
+        if (glob[i + 2] === '/') {
+          result += '(?:.+/)?'
+          i += 2
+        } else {
+          result += '.*'
+          i += 1
+        }
+      } else {
+        result += '[^/]*'
+      }
+    } else if (char === '?') {
+      result += '[^/]'
+    } else if ('.+^${}()|[]\\'.includes(char)) {
+      result += '\\' + char
+    } else {
+      result += char
+    }
+  }
+  return new RegExp('^' + result + '$')
 }
 
 function ensureRelative(dir: string, path: string) {

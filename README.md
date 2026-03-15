@@ -9,14 +9,14 @@
 # vite-tsconfig-paths
 
 [![npm](https://img.shields.io/npm/v/vite-tsconfig-paths.svg)](https://www.npmjs.com/package/vite-tsconfig-paths)
-[![Code style: Prettier](https://img.shields.io/badge/code_style-prettier-ff69b4.svg)](https://github.com/prettier/prettier)
+[![Code style: oxfmt](https://img.shields.io/badge/code_style-oxfmt-blue.svg)](https://oxc.rs/docs/guide/usage/formatter)
 
 Give [`vite`] the ability to resolve imports using TypeScript's path mapping.
 
 [`vite`]: https://github.com/vitejs/vite
 
 > [!NOTE]
-> **New in v6** – On-demand tsconfig discovery with `projectDiscovery: "lazy"`, automatic tsconfig reloads (including `vite build --watch`), support for “absolute path” aliases, and a new `logFile` option for detailed resolution traces. See the [Releases](https://github.com/aleclarson/vite-tsconfig-paths/releases) page for the full changelog.
+> **New in v7** – Resolution engine replaced with [oxc-resolver](https://github.com/oxc-project/oxc-resolver) for significantly faster path resolution. Rolldown hook filters added for optimized performance under Rolldown-powered Vite. All existing plugin options and behavior are preserved. See the [Releases](https://github.com/aleclarson/vite-tsconfig-paths/releases) page for the full changelog.
 
 ## Install
 
@@ -82,14 +82,18 @@ tsconfig/jsconfig files are reloaded automatically in both eager and lazy discov
 You pass these options when calling the plugin constructor in your Vite config.
 
 > [!WARNING]
-> You should try using the plugin without *any* of these options, and only set them when you know you need them.
+> You should try using the plugin without _any_ of these options, and only set them when you know you need them.
 
 ```ts
 import { defineConfig } from 'vite'
 import tsconfigPaths from 'vite-tsconfig-paths'
 
 export default defineConfig({
-  plugins: [tsconfigPaths({ /* options go here */ })],
+  plugins: [
+    tsconfigPaths({
+      /* options go here */
+    }),
+  ],
 })
 ```
 
@@ -168,7 +172,7 @@ Say the `baseUrl` is `../root` and you import `react`. This plugin will use `../
 
 The `include` and `exclude` tsconfig options are respected.
 
-Internally, [globrex](https://github.com/terkelg/globrex) is used for glob matching.
+Internally, a lightweight glob-to-regex compiler is used for glob matching.
 
 &nbsp;
 

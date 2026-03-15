@@ -4,6 +4,7 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "skipLibCheck": true,
+    "rootDir": "..",
     "paths": {
       "~utils/*": ["../my-utils/*"]
     }
