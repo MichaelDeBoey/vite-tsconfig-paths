@@ -4,7 +4,6 @@ import { debug } from './debug'
 type ImportDetails = { importer: string | undefined; id: string }
 type ConfigDetails = ImportDetails & { configPath: string }
 type ResolveDetails = ConfigDetails & { resolvedId: string }
-type NotFoundDetails = ConfigDetails & { candidates: string[] | null }
 
 export type LogEvent =
   | ['emptyImporter', ImportDetails]
@@ -13,11 +12,9 @@ export type LogEvent =
   | ['relativeId', ImportDetails]
   | ['virtualId', ImportDetails]
   | ['resolvedToDeclarationFile', ResolveDetails]
-  | ['resolvedWithBaseUrl', ResolveDetails]
-  | ['resolvedWithPaths', ResolveDetails]
   | ['resolved', ResolveDetails]
   | ['resolvedFromCache', ResolveDetails]
-  | ['notFound', NotFoundDetails | ConfigDetails]
+  | ['notFound', ConfigDetails]
   | ['configMismatch', ConfigDetails]
 
 /**

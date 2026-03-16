@@ -5,7 +5,7 @@ import { createLogFile } from './logFile'
 import type { NormalizedPath } from './path'
 import * as path from './path'
 import { createTsconfigResolvers, TsconfigResolvers } from './resolver'
-import { PluginOptions, ViteResolve } from './types'
+import { PluginOptions } from './types'
 
 export type { PluginOptions }
 
@@ -78,12 +78,7 @@ export default (opts: PluginOptions = {}): vite.Plugin => {
       filter: {
         id: /^(?!\.\.|\.\/|\0)/,
       },
-      async handler(
-        this: Pick<vite.Rollup.PluginContext, 'resolve'>,
-        id: string,
-        importer: string | undefined,
-        options: {}
-      ) {
+      async handler(id: string, importer: string | undefined) {
         if (!importer) {
           logFile?.write('emptyImporter', { importer, id })
           return
@@ -122,17 +117,8 @@ export default (opts: PluginOptions = {}): vite.Plugin => {
           }
         }
 
-        // For Vite 4 and under, skipSelf needs to be set.
-        const resolveOptions = { ...options, skipSelf: true }
-        const viteResolve: ViteResolve = async (id, importer) =>
-          (await this.resolve(id, importer, resolveOptions))?.id
-
         for await (const resolveId of tsconfigResolvers.get(importerFile)) {
-          const [resolved, matched] = await resolveId(
-            viteResolve,
-            id,
-            importerFile
-          )
+          const [resolved, matched] = await resolveId(id, importerFile)
           if (resolved) {
             return resolved
           }

@@ -125,13 +125,7 @@ export type Project = Merge<
   }
 >
 
-export type ViteResolve = (
-  id: string,
-  importer: string
-) => Promise<string | undefined>
-
 export type Resolver = (
-  viteResolve: ViteResolve,
   id: string,
   importer: string
 ) => Promise<readonly [resolved: string | undefined, matched: boolean]>

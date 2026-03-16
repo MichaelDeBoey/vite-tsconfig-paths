@@ -373,7 +373,9 @@ function createResolver(
   const configPath = project.tsconfigFile
   const config = project.tsconfig
 
-  debug('Config loaded:', inspect({ configPath, config }, false, 10, true))
+  if (debug.enabled) {
+    debug('Config loaded:', inspect({ configPath, config }, false, 10, true))
+  }
 
   // Sometimes a tsconfig is not meant to be used for path resolution,
   // but rather for pointing to other tsconfig files and possibly being
@@ -454,7 +456,7 @@ function createResolver(
   const queryPattern = /\?.+$/
   const dtsPattern = /\.d\.ts(\?|$)/
 
-  return async (viteResolve, id, importer) => {
+  return async (id, importer) => {
     // Remove query and hash parameters from the importer path.
     const importerFile = path.normalize(importer.replace(hashQueryPattern, ''))
 
@@ -488,8 +490,10 @@ function createResolver(
       })
     } else {
       // Use oxc-resolver for fast native tsconfig path resolution.
+      // Using async() to avoid blocking the event loop during
+      // concurrent pre-bundling and HMR.
       const importerDir = path.dirname(importerFile)
-      const result = oxcResolver.sync(importerDir, id)
+      const result = await oxcResolver.async(importerDir, id)
 
       if (result.path) {
         const resolved = path.normalize(result.path)
