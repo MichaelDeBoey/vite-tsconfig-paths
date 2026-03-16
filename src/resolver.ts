@@ -451,6 +451,7 @@ function createResolver(
       })())
 
   const resolutionCache = new Map<string, string>()
+  const inflightResolutions = new Map<string, Promise<string | undefined>>()
 
   const hashQueryPattern = /[#?].+$/
   const queryPattern = /\?.+$/
@@ -489,35 +490,44 @@ function createResolver(
         configPath,
       })
     } else {
-      // Use oxc-resolver for fast native tsconfig path resolution.
-      // Using async() to avoid blocking the event loop during
-      // concurrent pre-bundling and HMR.
-      const importerDir = path.dirname(importerFile)
-      const result = await oxcResolver.async(importerDir, id)
+      // Coalesce concurrent resolutions for the same specifier to avoid
+      // duplicate native calls during parallel pre-bundling.
+      let inflight = inflightResolutions.get(id)
+      if (!inflight) {
+        inflight = (async () => {
+          const importerDir = path.dirname(importerFile)
+          const result = await oxcResolver.async(importerDir, id)
+          if (result.path) {
+            const resolved = path.normalize(result.path)
+            // Skip .json resolutions unless explicitly imported (prevents
+            // accidental resolution to .json via baseUrl).
+            if (resolved.endsWith('.json') && !id.endsWith('.json')) {
+              return undefined
+            }
+            return resolved
+          }
+          return undefined
+        })()
+        inflightResolutions.set(id, inflight)
+      }
 
-      if (result.path) {
-        const resolved = path.normalize(result.path)
-
-        // Skip .json resolutions unless explicitly imported (prevents
-        // accidental resolution to .json via baseUrl).
-        if (resolved.endsWith('.json') && !id.endsWith('.json')) {
-          logFile?.write('notFound', { importer, id, configPath })
-          return notFound
-        }
-
-        resolvedId = resolved
-        logFile?.write('resolved', {
-          importer,
-          id,
-          resolvedId,
-          configPath,
-        })
+      try {
+        resolvedId = await inflight
+      } finally {
+        inflightResolutions.delete(id)
       }
 
       if (!resolvedId) {
         logFile?.write('notFound', { importer, id, configPath })
         return notFound
       }
+
+      logFile?.write('resolved', {
+        importer,
+        id,
+        resolvedId,
+        configPath,
+      })
       resolutionCache.set(id, resolvedId)
     }
 
